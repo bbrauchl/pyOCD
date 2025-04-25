@@ -124,7 +124,6 @@ from . import target_HC32L110
 from . import target_HC32L13x
 from . import target_HC32L19x
 from . import target_HC32L07x
-from . import target_MPS2_AN521
 from . import target_MPS3_AN522
 from . import target_MPS3_AN540
 from . import target_RP2040
@@ -137,7 +136,6 @@ from . import target_STM32H743xx
 from . import target_STM32H7B0xx
 from . import target_Air001
 from . import target_Air32F103xx
-from . import target_AMA3B1KK
 
 ## @brief Dictionary of all builtin targets.
 #
@@ -145,7 +143,6 @@ from . import target_AMA3B1KK
 #   instead of dashes punctuation. See pyocd.target.normalise_target_type_name() for the code that
 #   normalises user-provided target type names for comparison with these.
 BUILTIN_TARGETS = {
-          'mps2_an521': target_MPS2_AN521.AN521,
           'mps3_an522': target_MPS3_AN522.AN522,
           'mps3_an540': target_MPS3_AN540.AN540,
           'cortex_m': CoreSightTarget,
@@ -319,5 +316,4 @@ BUILTIN_TARGETS = {
           'air32f103xp': target_Air32F103xx.Air32F103xP,
           'air32f103xe': target_Air32F103xx.Air32F103xE,
           'air32f103xg': target_Air32F103xx.Air32F103xG,
-          'ama3b1kk_kbr': target_AMA3B1KK.AMA3B1KK_KBR,
          }

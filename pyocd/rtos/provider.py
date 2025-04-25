@@ -53,15 +53,14 @@ class ThreadProvider(object):
         self._last_run_token = -1
         self._read_from_target = False
 
-    def _lookup_symbols(self, symbolList, symbolProvider, allowPartial = False):
+    def _lookup_symbols(self, symbolList, symbolProvider):
         syms = {}
         for name in symbolList:
             addr = symbolProvider.get_symbol_value(name)
             LOG.debug("Value for symbol %s = %s", name, hex(addr) if addr is not None else "<none>")
-            if addr is not None:
-                syms[name] = addr
-            elif not allowPartial:
+            if addr is None:
                 return None
+            syms[name] = addr
         return syms
 
     def init(self, symbolProvider):
