@@ -20,7 +20,7 @@ import logging
 from time import sleep
 
 from ...coresight import ap
-from ...coresight.cortex_m import CortexM
+from ...coresight import (cortex_m, cortex_m_v8m)
 from ...core import exceptions
 from ...core.target import Target
 from ...coresight.coresight_target import CoreSightTarget
@@ -28,34 +28,99 @@ from ...utility.timeout import Timeout
 
 LOG = logging.getLogger(__name__)
 
-class S32k3xx(CoreSightTarget):
+SDA_AP_IDR_EXPECTED = 0x001c0040
+
+SDA_AP_DBGENCTRL_CNIDEN_MASK      = 0x20000000
+SDA_AP_DBGENCTRL_CNIDEN_SHIFT     = 29
+SDA_AP_DBGENCTRL_CDBGEN_MASK      = 0x10000000
+SDA_AP_DBGENCTRL_CDBGEN_SHIFT     = 28
+SDA_AP_DBGENCTRL_GSPNIDEN_MASK    = 0x80
+SDA_AP_DBGENCTRL_GSPNIDEN_SHIFT   = 7
+SDA_AP_DBGENCTRL_GSPIDEN_MASK     = 0x40
+SDA_AP_DBGENCTRL_GSPIDEN_SHIFT    = 6
+SDA_AP_DBGENCTRL_GNIDEN_MASK      = 0x20
+SDA_AP_DBGENCTRL_GNIDEN_SHIFT     = 5
+SDA_AP_DBGENCTRL_GDBGEN_MASK      = 0x10
+SDA_AP_DBGENCTRL_GDBGEN_SHIFT     = 4
+
+SDA_AP_DBGENCTRL_ADDR   = 0x80
+SDA_AP_DBGENCTRL_EN_ALL = (SDA_AP_DBGENCTRL_CNIDEN_MASK | SDA_AP_DBGENCTRL_CDBGEN_MASK | SDA_AP_DBGENCTRL_GSPNIDEN_MASK |
+                           SDA_AP_DBGENCTRL_GSPIDEN_MASK | SDA_AP_DBGENCTRL_GNIDEN_MASK | SDA_AP_DBGENCTRL_GDBGEN_MASK)
+
+SDAAPRSTCTRL_ADDR               = 0x90
+SDAAPRSTCTRL_RSTRELTLCM73_MASK  = 0x10000000
+SDAAPRSTCTRL_RSTRELTLCM72_MASK  = 0x08000000
+SDAAPRSTCTRL_RSTRELTLCM71_MASK  = 0x04000000
+SDAAPRSTCTRL_RSTRELTLCM70_MASK  = 0x02000000
+
+MDM_IDR_EXPECTED = 0x001c0000
+MDM_IDR_VERSION_MASK = 0xf0
+MDM_IDR_VERSION_SHIFT = 4
+
+HALT_TIMEOUT = 2.0
+
+class S32K3XX(CoreSightTarget):
     """@brief Family class for NXP S32K3xx devices.
     """
 
     VENDOR = "NXP"
 
     def __init__(self, session, memory_map=None):
-        super(Kinetis, self).__init__(session, memory_map)
+        super(S32K3XX, self).__init__(session, memory_map)
         self.mdm_ap = None
         self._force_halt_on_connect = False
 
     def create_init_sequence(self):
-        seq = super(Kinetis, self).create_init_sequence()
+        seq = super(S32K3XX, self).create_init_sequence()
 
-        seq.wrap_task('discovery',  lambda seq: \
-                                        seq.insert_before('find_components',
-                                            ('check_mdm_ap_idr',        self.check_mdm_ap_idr),
-                                            ('check_flash_security',    self.check_flash_security),
-                                            ))
+        seq.wrap_task('discovery',  lambda seq: seq
+
+            # Cores are not in order in DAP, so we need to number them manually
+            .replace_task('create_cores', self.create_s32k3_cores)
+
+            .insert_before('find_components',
+                ('check_mdm_ap_idr', self.check_mdm_ap_idr),
+                ('check_sda_ap_idr', self.check_sda_ap_idr),
+                ('enable_debug', self.enable_s32k3_debug))
+        )
 
         return seq
+
+    def create_s32k3_cores(self):
+        # we need to manually adjust the order here as the cores are not in order on the debug interface
+        LOG.debug("All Found APs: {}".format(self.dp.aps))
+
+        # Order of core APs in the debug port. Filter all APS discovered with this list
+        # note that on the smaller S32K3 devices, not all of these will be available.
+        core_aps = [4, 5, 3, 8]
+
+        # Filter with the actually found aps
+        core_aps = filter(lambda x: x in self.dp.aps.keys(), core_aps)
+        core_aps = [self.dp.aps.get(x) for x in core_aps]
+
+        LOG.debug("Core APs: {}".format(core_aps))
+        rom_table_aps = [x for x in core_aps if x.rom_table]
+        LOG.debug("Filtered APs: {}".format(rom_table_aps))
+        for ap in rom_table_aps:
+            ap.rom_table.for_each(self.create_s32k3_core, lambda c: c.factory in (cortex_m.CortexM.factory, cortex_m_v8m.CortexM_v8M.factory))
+
+    def create_s32k3_core(self, cmpid):
+        try:
+            LOG.debug("Creating %s component", cmpid.name)
+            cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
+            cmp.init()
+        except exceptions.Error as err:
+            LOG.error("Error attempting to create component %s: %s", cmpid.name, err, exec_info=self.session.log_tracebacks)
+
+    def enable_s32k3_debug(self):
+        self.sda_ap.write_reg(SDA_AP_DBGENCTRL_ADDR, SDA_AP_DBGENCTRL_EN_ALL)
 
     def check_mdm_ap_idr(self):
         if not self.dp.aps:
             LOG.debug('Not found valid aps, skip MDM-AP check.')
             return
 
-        self.mdm_ap = self.dp.aps[1]
+        self.mdm_ap = self.dp.aps[6]
 
         # Check MDM-AP ID.
         if (self.mdm_ap.idr & ~MDM_IDR_VERSION_MASK) != MDM_IDR_EXPECTED:
@@ -64,219 +129,95 @@ class S32k3xx(CoreSightTarget):
         self.mdm_ap_version = (self.mdm_ap.idr & MDM_IDR_VERSION_MASK) >> MDM_IDR_VERSION_SHIFT
         LOG.debug("MDM-AP version %d", self.mdm_ap_version)
 
-    def check_flash_security(self):
-        """@brief Check security and unlock device.
-
-        This init task determines whether the device is locked (flash security enabled). If it is,
-        and if auto unlock is enabled, then perform a mass erase to unlock the device.
-
-        This whole sequence is greatly complicated by some behaviour of the device when flash is
-        blank. If flash is blank and the device does not have a ROM, then it will repeatedly enter
-        lockup and then reset.
-
-        Immediately after reset asserts, the flash controller begins to initialise. The device is
-        always locked, and flash security reads as enabled, until the flash controller has finished
-        its init sequence. Thus, depending on exactly when the debugger reads the MDM-AP status
-        register, a blank, unlocked device may be detected as locked.
-
-        There is also the possibility that the device will be (correctly) detected as unlocked, but
-        it resets again before the core can be halted, thus causing connect to fail.
-
-        This init task runs *before* cores are created.
-        """
+    def check_sda_ap_idr(self):
         if not self.dp.aps:
+            LOG.debug("No valid aps found, skipping sda_ap check")
             return
 
-        # check for flash security
-        isLocked = self.is_locked()
-
-        # Test whether we can reliably access the memory and the core. This test can fail if flash
-        # is blank and the device is auto-resetting.
-        if isLocked:
-            canAccess = False
+        self.sda_ap = self.dp.aps[7]
+        if self.sda_ap.idr == SDA_AP_IDR_EXPECTED:
+            LOG.debug("Found SDA-AP IDR (0x%08x)", self.sda_ap.idr)
         else:
-            try:
-                # Ensure to use AP#0 as a MEM_AP
-                if isinstance(self.aps[0], ap.MEM_AP):
-                    for attempt in range(ACCESS_TEST_ATTEMPTS):
-                        self.aps[0].read32(CortexM.DHCSR)
-            except exceptions.TransferError:
-                LOG.debug("Access test failed with fault")
-                canAccess = False
-            else:
-                canAccess = True
-
-        # Verify locked status under reset. We only want to assert reset if the device looks locked
-        # or accesses fail, otherwise we could not support attach mode debugging.
-        if not canAccess:
-            # Keep the target in reset until is had been erased and halted. It will be deasserted
-            # later, in perform_halt_on_connect().
-            #
-            # Ideally we would use the MDM-AP to hold the device in reset, but SYSTEM_RESET_REQUEST
-            # cannot be written in MDM_CTRL when the device is locked in MDM-AP version 0.
-            self.dp.assert_reset(True)
-
-            # Re-read locked status under reset.
-            isLocked = self.is_locked()
-
-            # If the device isn't really locked, we have no choice but to halt on connect.
-            if not isLocked and self.session.options.get('connect_mode') == 'attach':
-                LOG.warning("Forcing halt on connect in order to gain control of device")
-                self._force_halt_on_connect = True
-
-        # Only do a mass erase if the device is actually locked.
-        if isLocked:
-            if self.session.options.get('auto_unlock'):
-                LOG.warning("%s in secure state: will try to unlock via mass erase", self.part_number)
-
-                # Do the mass erase.
-                if not self.mass_erase():
-                    self.dp.assert_reset(False)
-                    self.mdm_ap.write_reg(MDM_CTRL, 0)
-                    LOG.error("%s: mass erase failed", self.part_number)
-                    raise exceptions.TargetError("unable to unlock device")
-
-                # Assert that halt on connect was forced above. Reset will stay asserted
-                # until halt on connect is executed.
-                # assert self._force_halt_on_connect
-
-#                 isLocked = False
-            else:
-                LOG.warning("%s in secure state: not automatically unlocking", self.part_number)
-        else:
-            LOG.info("%s not in secure state", self.part_number)
+            LOG.error("%s: bad SDA-AP IDR (is 0x%08x)", self.part_number, self.sda_ap.idr)
 
     def perform_halt_on_connect(self):
         """This init task runs *after* cores are created."""
         if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-            if not self.mdm_ap:
+            if not self.mdm_ap or not self.sda_ap:
                 return
-            LOG.info("Configuring MDM-AP to halt when coming out of reset")
+            LOG.info("Configuring SDA-AP to halt when coming out of reset")
             # Prevent the target from resetting if it has invalid code
             with Timeout(HALT_TIMEOUT) as to:
                 while to.check():
-                    self.mdm_ap.write_reg(MDM_CTRL, MDM_CTRL_DEBUG_REQUEST | MDM_CTRL_CORE_HOLD_RESET)
-                    if self.mdm_ap.read_reg(MDM_CTRL) & (MDM_CTRL_DEBUG_REQUEST | MDM_CTRL_CORE_HOLD_RESET) == (MDM_CTRL_DEBUG_REQUEST | MDM_CTRL_CORE_HOLD_RESET):
+                    self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, 0)
+                    if 0 == self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & (SDAAPRSTCTRL_RSTRELTLCM70_MASK
+                                                                     | SDAAPRSTCTRL_RSTRELTLCM71_MASK
+                                                                     | SDAAPRSTCTRL_RSTRELTLCM72_MASK
+                                                                     | SDAAPRSTCTRL_RSTRELTLCM73_MASK):
                         break
                 else:
-                    raise exceptions.TimeoutError("Timed out attempting to set DEBUG_REQUEST and CORE_HOLD_RESET in MDM-AP")
-
-            # Enable debug
-            self.aps[0].write_memory(CortexM.DHCSR, CortexM.DBGKEY | CortexM.C_DEBUGEN)
+                    raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
 
         else:
-            super(Kinetis, self).perform_halt_on_connect()
+            super(S32K3XX, self).perform_halt_on_connect()
 
     def post_connect(self):
         if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-            if not self.mdm_ap:
+            if not self.mdm_ap or not self.sda_ap:
                 return
+
+
             # We can now deassert reset.
             LOG.info("Deasserting reset post connect")
             self.dp.assert_reset(False)
 
-            # Disable holding the core in reset, leave MDM halt on
-            self.mdm_ap.write_reg(MDM_CTRL, MDM_CTRL_DEBUG_REQUEST)
+            # Enable debug
+            LOG.info("Current_aps: {}".format(self.aps))
+            LOG.info("Current_dp_aps: {}".format(self.dp.aps))
+            self.dp.aps[4].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
+            self.dp.aps[5].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
 
-            # Wait until the target is halted
-            with Timeout(HALT_TIMEOUT) as to:
-                while to.check():
-                    if self.mdm_ap.read_reg(MDM_STATUS) & MDM_STATUS_CORE_HALTED == MDM_STATUS_CORE_HALTED:
-                        break
-                    LOG.debug("Waiting for mdm halt")
-                    sleep(0.01)
-                else:
-                    raise exceptions.TimeoutError("Timed out waiting for core to halt")
+            self.dp.aps[4].write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
+            self.dp.aps[5].write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
 
-            # release MDM halt once it has taken effect in the DHCSR
-            self.mdm_ap.write_reg(MDM_CTRL, 0)
+            # self.dp.aps[3].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN |
+            #     cortex_m.CortexM.C_HALT)
+            # self.dp.aps[8].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN |
+            #     cortex_m.CortexM.C_HALT)
 
-            # sanity check that the target is still halted
+            # I think debug authorization needs to happen here.
+
+            LOG.debug("Core 0 DHCSR: 0x{:08x}".format(self.dp.aps[4].read_memory(cortex_m.CortexM.DHCSR)))
+            LOG.debug("Core 1 DHCSR: 0x{:08x}".format(self.dp.aps[5].read_memory(cortex_m.CortexM.DHCSR)))
+            LOG.debug("Core 0 DEMCR: 0x{:08x}".format(self.dp.aps[4].read_memory(cortex_m.CortexM.DEMCR)))
+            LOG.debug("Core 1 DEMCR: 0x{:08x}".format(self.dp.aps[5].read_memory(cortex_m.CortexM.DEMCR)))
+
+
+            # self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, SDAAPRSTCTRL_RSTRELTLCM70_MASK | SDAAPRSTCTRL_RSTRELTLCM71_MASK |
+            #     SDAAPRSTCTRL_RSTRELTLCM72_MASK | SDAAPRSTCTRL_RSTRELTLCM73_MASK)
+            LOG.debug("Allow core to come out of reaset")
+            self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, SDAAPRSTCTRL_RSTRELTLCM70_MASK)
+
             if self.get_state() == Target.State.RUNNING:
                 raise exceptions.DebugError("Target failed to stay halted during init sequence")
 
-    def is_locked(self):
-        if not self.mdm_ap:
-            return False
-
-        self._wait_for_flash_init()
-
-        val = self.mdm_ap.read_reg(MDM_STATUS)
-        return (val & MDM_STATUS_SYSTEM_SECURITY) != 0
-
-    def _wait_for_flash_init(self):
-        # Wait until flash is inited.
-        with Timeout(MASS_ERASE_TIMEOUT) as to:
-            while to.check():
-                status = self.mdm_ap.read_reg(MDM_STATUS)
-                if status & MDM_STATUS_FLASH_READY:
-                    break
-                sleep(0.01)
-        return not to.did_time_out
-
-    def mass_erase(self):
-        """@brief Perform a mass erase operation.
-        @note Reset is held for the duration of this function.
-        @return True Mass erase succeeded.
-        @return False Mass erase failed or is disabled.
-        """
-        # Read current reset state so we can restore it, then assert reset if needed.
-        wasResetAsserted = self.dp.is_reset_asserted()
-        if not wasResetAsserted:
-            self.dp.assert_reset(True)
-
-        # Perform the erase.
-        result = self._mass_erase()
-
-        # Restore previous reset state.
-        if not wasResetAsserted:
-            self.dp.assert_reset(False)
-        return result
-
-    def _mass_erase(self):
-        """@brief Private mass erase routine."""
-        # Flash must finish initing before we can mass erase.
-        if not self._wait_for_flash_init():
-            LOG.error("Mass erase timeout waiting for flash to finish init")
-            return False
-
-        # Check if mass erase is enabled.
-        status = self.mdm_ap.read_reg(MDM_STATUS)
-        if not (status & MDM_STATUS_MASS_ERASE_ENABLE):
-            LOG.error("Mass erase disabled. MDM status: 0x%x", status)
-            return False
-
-        # Set Flash Mass Erase in Progress bit to start erase.
-        self.mdm_ap.write_reg(MDM_CTRL, MDM_CTRL_FLASH_MASS_ERASE_IN_PROGRESS)
-
-        # Wait for Flash Mass Erase Acknowledge to be set.
-        with Timeout(MASS_ERASE_TIMEOUT) as to:
-            while to.check():
-                val = self.mdm_ap.read_reg(MDM_STATUS)
-                if val & MDM_STATUS_FLASH_MASS_ERASE_ACKNOWLEDGE:
-                    break
-                sleep(0.1)
-            else: #if to.did_time_out:
-                LOG.error("Mass erase timeout waiting for Flash Mass Erase Ack to set")
-                return False
-
-        # Wait for Flash Mass Erase in Progress bit to clear when erase is completed.
-        with Timeout(MASS_ERASE_TIMEOUT) as to:
-            while to.check():
-                val = self.mdm_ap.read_reg(MDM_CTRL)
-                if ((val & MDM_CTRL_FLASH_MASS_ERASE_IN_PROGRESS) == 0):
-                    break
-                sleep(0.1)
-            else: #if to.did_time_out:
-                LOG.error("Mass erase timeout waiting for Flash Mass Erase in Progress to clear")
-                return False
-
-        # Confirm the part was unlocked
-        val = self.mdm_ap.read_reg(MDM_STATUS)
-        if (val & MDM_STATUS_SYSTEM_SECURITY) == 0:
-            LOG.warning("%s secure state: unlocked successfully", self.part_number)
-            return True
-        else:
-            LOG.error("Failed to unlock. MDM status: 0x%x", val)
-            return False
-
+            #
+            # # Disable holding the core in reset, leave MDM halt on
+            # self.mdm_ap.write_reg(MDM_CTRL, MDM_CTRL_DEBUG_REQUEST)
+            #
+            # # Wait until the target is halted
+            # with Timeout(HALT_TIMEOUT) as to:
+            #     while to.check():
+            #         if self.mdm_ap.read_reg(MDM_STATUS) & MDM_STATUS_CORE_HALTED == MDM_STATUS_CORE_HALTED:
+            #             break
+            #         LOG.debug("Waiting for mdm halt")
+            #         sleep(0.01)
+            #     else:
+            #         raise exceptions.TimeoutError("Timed out waiting for core to halt")
+            #
+            # # release MDM halt once it has taken effect in the DHCSR
+            # self.mdm_ap.write_reg(MDM_CTRL, 0)
+            #
+            # # sanity check that the target is still halted
+            # if self.get_state() == Target.State.RUNNING:
+            #     raise exceptions.DebugError("Target failed to stay halted during init sequence")

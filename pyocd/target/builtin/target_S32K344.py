@@ -14,35 +14,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-
-from ...core import exceptions
 from ...coresight.coresight_target import CoreSightTarget
+from ..family.target_s32k3xx import S32K3XX
 from ...core.memory_map import (FlashRegion, RamRegion, MemoryMap)
-from ...coresight import (cortex_m, cortex_m_v8m)
 
 # AP IDs:
 # [1]   APB_AP
 # [4]   CM7_0_AHB_AP
 # [6]   MDM_AP
 # [7]   SDA_AP
-# APB_AP_ID       = 1
-# CM7_0_AHB_AP_ID = 4
-# MDM_AP_ID       = 6
-# SDA_AP_ID       = 7
-# AP_ID_LIST      = [APB_AP_ID, CM7_0_AHB_AP_ID, MDM_AP_ID, SDA_AP_ID]
-
-SDA_AP_IDR_EXPECTED     = 0x001c0040
+APB_AP_ID       = 1
+CM7_0_AHB_AP_ID = 4
+MDM_AP_ID       = 6
+SDA_AP_ID       = 7
+AP_ID_LIST      = [APB_AP_ID, CM7_0_AHB_AP_ID, MDM_AP_ID, SDA_AP_ID]
 
 # SDA_AP registers:
-# [0x00] 
-SDA_AP_AUTHSTTS_ADDR    = 0x00
-SDA_AP_AUTHCTL_ADDR     = 0x04
-
-# [0x10-0x2C] Key Challenge (KEYCHAL0 - KEYCHAL7)
-SDA_AP_KEYCHAL_ADDR     = [0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C]
-# [0x40-0x5C] Key Challenge Registers for challenge-response debug unlock
-SDA_AP_KEYRESP_ADDR     = [0x40, 0x44, 0x48, 0x4C, 0x50, 0x54, 0x58, 0x5C]
 # [0x80]    Debug Enable Control (DBGENCTRL)
 SDA_AP_DBGENCTRL_ADDR   = 0x80
 
@@ -70,8 +57,6 @@ SDA_AP_GDBGEN_MASK      = 0x10
 SDA_AP_GDBGEN_SHIFT     = 4
 SDA_AP_EN_ALL           = (SDA_AP_CNIDEN_MASK | SDA_AP_CDBGEN_MASK | SDA_AP_GSPNIDEN_MASK |
                            SDA_AP_GSPIDEN_MASK | SDA_AP_GNIDEN_MASK | SDA_AP_GDBGEN_MASK)
-
-LOG = logging.getLogger(__name__)
 
 FLASH_ALGO_CODE = {
     'load_address' : 0x20000000,
@@ -514,7 +499,7 @@ FLASH_ALGO_DATA = {
     )
 }
 
-class S32K344(CoreSightTarget):
+class S32K344(S32K3XX):
 
     VENDOR = "NXP"
 
@@ -538,72 +523,17 @@ class S32K344(CoreSightTarget):
     def create_init_sequence(self):
         seq = super(S32K344, self).create_init_sequence()
 
-        seq.wrap_task('discovery',
-            lambda seq: seq
-                # Normally the discovery sequence will scan for APs and then add those found
-                # to a list. Unfortunately, the S32K344 freaks out when you scan for nonexistent
-                # APs, so the list of APs are provided statically here.
-                # .replace_task('find_aps', self.create_s32k344_aps)
-                .insert_after('create_aps', ('print_aps', self.print_s32k344_aps)) 
-
-                # Debug needs to be enabled in the SDA_AP before pyOCD can probe for
-                # components.
-                .insert_before('find_components',
-                    ('check_sda_ap', self.check_sda_ap),
-                    ('enable_debug', self.enable_s32k344_debug))
-
-                # Cores are not in order in DAP, so we need to number them manually
-                .replace_task('create_cores', self.create_s32k3_cores)
-                # .insert_before('create_cores',
-                #     ('create_s32k3_cores', self.create_s32k3_cores))
-        )
+        # seq.wrap_task('discovery',
+        #     lambda seq: seq
+        #         # Normally the discovery sequence will scan for APs and then add those found
+        #         # to a list. Unfortunately, the S32K344 freaks out when you scan for nonexistent
+        #         # APs, so the list of APs are provided statically here.
+        #         .replace_task('find_aps', self.create_s32k344_aps)
+        #
+        #         # Debug needs to be enabled in the SDA_AP before pyOCD can probe for
+        #         # components.
+        #         .insert_before('find_components',
+        #             ('enable_debug', self.enable_s32k344_debug))
+        # )
 
         return seq
-
-    # def create_s32k344_aps(self):
-    #     self.dp.valid_aps = AP_ID_LIST
-
-    def print_s32k344_aps(self):
-        LOG.debug("Printing aps")
-        LOG.debug("{}".format(self.dp.aps))
-
-    def check_sda_ap(self):
-        if not self.dp.aps:
-            LOG.debug("No valid aps found, skipping sda_ap check")
-            return
-
-        self.sda_ap = self.dp.aps[7]
-        if self.sda_ap.idr == SDA_AP_IDR_EXPECTED:
-            LOG.debug("Found SDA-AP IDR (0x%08x)", self.sda_ap.idr)
-        else:
-            LOG.error("%s: bad SDA-AP IDR (is 0x%08x)", self.part_number, self.sda_ap.idr)
-
-    def create_s32k3_core(self, cmpid):
-        try:
-            LOG.debug("Creating %s component", cmpid.name)
-            cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
-            cmp.init()
-        except exceptions.Error as err:
-            LOG.error("Error attempting to create component %s: %s", cmpid.name, err, exec_info=self.session.log_tracebacks)
-
-    def create_s32k3_cores(self):
-        # we need to manually adjust the order here as the cores are not in order on the debug interface
-        LOG.debug("All Found APs: {}".format(self.dp.aps))
-
-        # Order of core APs in the debug port. Filter all APS discovered with this list
-        # note that on the smaller S32K3 devices, not all of these will be available.
-        core_aps = [4, 5, 3, 8]
-        # Filter with the actually found aps
-        core_aps = filter(lambda x: x in self.dp.aps.keys(), core_aps)
-        core_aps = [self.dp.aps.get(x) for x in core_aps]
-
-        LOG.debug("Core APs: {}".format(core_aps))
-        rom_table_aps = [x for x in core_aps if x.rom_table]
-        LOG.debug("Filtered APs: {}".format(rom_table_aps))
-        for ap in rom_table_aps:
-            ap.rom_table.for_each(self.create_s32k3_core, lambda c: c.factory in (cortex_m.CortexM.factory, cortex_m_v8m.CortexM_v8M.factory))
-
-
-    def enable_s32k344_debug(self):
-        self.sda_ap.write_reg(SDA_AP_DBGENCTRL_ADDR, SDA_AP_EN_ALL)
-
