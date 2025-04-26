@@ -2,6 +2,7 @@
 # Copyright (c) 2020 NXP
 # Copyright (c) 2006-2018 Arm Limited
 # Copyright (c) 2021 Chris Reed
+# Copyright (c) 2025 Bryan Brauchler
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,13 +21,22 @@ import logging
 from time import sleep
 
 from ...coresight import ap
-from ...coresight import (cortex_m, cortex_m_v8m)
+from ...coresight import cortex_m
 from ...core import exceptions
 from ...core.target import Target
 from ...coresight.coresight_target import CoreSightTarget
 from ...utility.timeout import Timeout
+from pyocd import coresight
 
 LOG = logging.getLogger(__name__)
+
+# When scanning S32K3xx device, we may find 1-4 cores (depending on variant) with the following mapping:
+# Core 0 - AP#4
+# Core 1 - AP#5
+# Core 2 - AP#3
+# Core 3 - AP#8
+# Maybe this should somehow be device specific....
+CORE_AP_ORDERING = [4, 5, 3, 8]
 
 SDA_AP_IDR_EXPECTED = 0x001c0040
 
@@ -68,41 +78,64 @@ class S32K3XX(CoreSightTarget):
     def __init__(self, session, memory_map=None):
         super(S32K3XX, self).__init__(session, memory_map)
         self.mdm_ap = None
+        self.sda_ap = None
         self._force_halt_on_connect = False
 
     def create_init_sequence(self):
         seq = super(S32K3XX, self).create_init_sequence()
 
+        seq.insert_before('unlock_device',
+                        ('s32k3_pre_unlock', self.s32k3_pre_unlock))
+
         seq.wrap_task('discovery',  lambda seq: seq
 
+            .replace_task('find_aps', self.create_s32k344_aps)
             # Cores are not in order in DAP, so we need to number them manually
             .replace_task('create_cores', self.create_s32k3_cores)
 
             .insert_before('find_components',
                 ('check_mdm_ap_idr', self.check_mdm_ap_idr),
                 ('check_sda_ap_idr', self.check_sda_ap_idr),
-                ('enable_debug', self.enable_s32k3_debug))
+                ('enable_s32K3_debug', self.enable_s32k3_debug))
         )
 
         return seq
 
+    def create_s32k344_aps(self):
+        self.dp.valid_aps = [1, 4, 5, 6, 7]
+
     def create_s32k3_cores(self):
+        """@brief Create all cores found when scanning
+
+        This task creates cores from the scanned APs.
+
+        On S32K3 devices there are 2 challenges:
+        1) On some of the larger devices, APs are not in ascending core order, and cores will be added
+        in the wrong order when using the default CortexM factory
+        2) On devices that configure can Core 0/1 in lockstep, Core 0 AP will act as the debug port for
+        the lockstep pair. Core 1's AP is unused and should be skipped when adding cores. This also
+        affects core numbering for these devices. This can be configured via OTP so the core configuration
+        is not garenteed when connecting to the device.
+
+        For now, we will used a hard-coded core definition from the derivative class, and create multiple
+        derivative classes for each core configuration. (S32K388 vs S32K388LS)
+
+        TODO: Maybe the lockstep status of the cores can be detected here rather than hardcoded in the child.
+        This can be read from DCMROF19[29]. This also will make it clear if cores are misconfigured as core 1
+        will not be registered if the device configured in LS.
+        """
         # we need to manually adjust the order here as the cores are not in order on the debug interface
         LOG.debug("All Found APs: {}".format(self.dp.aps))
 
-        # Order of core APs in the debug port. Filter all APS discovered with this list
-        # note that on the smaller S32K3 devices, not all of these will be available.
-        core_aps = [4, 5, 3, 8]
+        # When scanning S32K3xx device, we may find 1-4 cores (depending on variant)
+        self.core_aps = filter(lambda x: x in self.dp.aps.keys(), CORE_AP_ORDERING)
+        self.core_aps = [self.dp.aps.get(x) for x in self.core_aps]
 
-        # Filter with the actually found aps
-        core_aps = filter(lambda x: x in self.dp.aps.keys(), core_aps)
-        core_aps = [self.dp.aps.get(x) for x in core_aps]
-
-        LOG.debug("Core APs: {}".format(core_aps))
-        rom_table_aps = [x for x in core_aps if x.rom_table]
+        LOG.debug("Core APs: {}".format(self.core_aps))
+        rom_table_aps = [x for x in self.core_aps if x.rom_table]
         LOG.debug("Filtered APs: {}".format(rom_table_aps))
         for ap in rom_table_aps:
-            ap.rom_table.for_each(self.create_s32k3_core, lambda c: c.factory in (cortex_m.CortexM.factory, cortex_m_v8m.CortexM_v8M.factory))
+            ap.rom_table.for_each(self.create_s32k3_core, lambda c: c.factory == cortex_m.CortexM.factory)
 
     def create_s32k3_core(self, cmpid):
         try:
@@ -110,7 +143,7 @@ class S32K3XX(CoreSightTarget):
             cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
             cmp.init()
         except exceptions.Error as err:
-            LOG.error("Error attempting to create component %s: %s", cmpid.name, err, exec_info=self.session.log_tracebacks)
+            LOG.error("Error attempting to create component %s: %s", cmpid.name, err, exc_info=self.session.log_tracebacks)
 
     def enable_s32k3_debug(self):
         self.sda_ap.write_reg(SDA_AP_DBGENCTRL_ADDR, SDA_AP_DBGENCTRL_EN_ALL)
@@ -135,28 +168,53 @@ class S32K3XX(CoreSightTarget):
             return
 
         self.sda_ap = self.dp.aps[7]
-        if self.sda_ap.idr == SDA_AP_IDR_EXPECTED:
-            LOG.debug("Found SDA-AP IDR (0x%08x)", self.sda_ap.idr)
+
+    def _check_sda_ap_idr(self, sda_ap):
+        if not sda_ap:
+            LOG.debug("No valid ap, skipping sda_ap check")
+            return
+
+        if sda_ap.idr == SDA_AP_IDR_EXPECTED:
+            LOG.debug("Found SDA-AP IDR (0x%08x)", sda_ap.idr)
         else:
-            LOG.error("%s: bad SDA-AP IDR (is 0x%08x)", self.part_number, self.sda_ap.idr)
+            LOG.error("%s: bad SDA-AP IDR (is 0x%08x)", self.part_number, sda_ap.idr)
+
+
+    def s32k3_pre_unlock(self):
+
+        sda_ap_apsel = 7
+        sda_ap = ap.AccessPort.create(self.dp, ap.APv1Address(sda_ap_apsel))
+        self.sda_ap = sda_ap
+
+        self._check_sda_ap_idr(sda_ap)
+
+        if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
+
+            # Note that in order to perform debug unlock, the device has to come out of reset.
+            # Therefore, we write registers to keep the cores in reset and de-assert the reset
+            # pin now to allow for debug authentication. Cores will be released later.
+            with Timeout(HALT_TIMEOUT) as to:
+                while to.check():
+                    sda_ap.write_reg(SDAAPRSTCTRL_ADDR, 0)
+                    if 0 == sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & (SDAAPRSTCTRL_RSTRELTLCM70_MASK
+                                                                 | SDAAPRSTCTRL_RSTRELTLCM71_MASK
+                                                                 | SDAAPRSTCTRL_RSTRELTLCM72_MASK
+                                                                 | SDAAPRSTCTRL_RSTRELTLCM73_MASK):
+                        break
+                else:
+                    raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
+
+            LOG.debug("Deasserting Reset")
+            self.dp.assert_reset(False)
 
     def perform_halt_on_connect(self):
         """This init task runs *after* cores are created."""
         if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-            if not self.mdm_ap or not self.sda_ap:
-                return
-            LOG.info("Configuring SDA-AP to halt when coming out of reset")
-            # Prevent the target from resetting if it has invalid code
-            with Timeout(HALT_TIMEOUT) as to:
-                while to.check():
-                    self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, 0)
-                    if 0 == self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & (SDAAPRSTCTRL_RSTRELTLCM70_MASK
-                                                                     | SDAAPRSTCTRL_RSTRELTLCM71_MASK
-                                                                     | SDAAPRSTCTRL_RSTRELTLCM72_MASK
-                                                                     | SDAAPRSTCTRL_RSTRELTLCM73_MASK):
-                        break
-                else:
-                    raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
+
+            for ap in self.dp.aps.values():
+                if ap.core is not None:
+                    ap.write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
+                    ap.write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
 
         else:
             super(S32K3XX, self).perform_halt_on_connect()
@@ -166,58 +224,12 @@ class S32K3XX(CoreSightTarget):
             if not self.mdm_ap or not self.sda_ap:
                 return
 
-
-            # We can now deassert reset.
-            LOG.info("Deasserting reset post connect")
-            self.dp.assert_reset(False)
-
-            # Enable debug
-            LOG.info("Current_aps: {}".format(self.aps))
-            LOG.info("Current_dp_aps: {}".format(self.dp.aps))
-            self.dp.aps[4].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
-            self.dp.aps[5].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
-
-            self.dp.aps[4].write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
-            self.dp.aps[5].write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
-
-            # self.dp.aps[3].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN |
-            #     cortex_m.CortexM.C_HALT)
-            # self.dp.aps[8].write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN |
-            #     cortex_m.CortexM.C_HALT)
-
-            # I think debug authorization needs to happen here.
-
-            LOG.debug("Core 0 DHCSR: 0x{:08x}".format(self.dp.aps[4].read_memory(cortex_m.CortexM.DHCSR)))
-            LOG.debug("Core 1 DHCSR: 0x{:08x}".format(self.dp.aps[5].read_memory(cortex_m.CortexM.DHCSR)))
-            LOG.debug("Core 0 DEMCR: 0x{:08x}".format(self.dp.aps[4].read_memory(cortex_m.CortexM.DEMCR)))
-            LOG.debug("Core 1 DEMCR: 0x{:08x}".format(self.dp.aps[5].read_memory(cortex_m.CortexM.DEMCR)))
-
-
-            # self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, SDAAPRSTCTRL_RSTRELTLCM70_MASK | SDAAPRSTCTRL_RSTRELTLCM71_MASK |
-            #     SDAAPRSTCTRL_RSTRELTLCM72_MASK | SDAAPRSTCTRL_RSTRELTLCM73_MASK)
             LOG.debug("Allow core to come out of reaset")
-            self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, SDAAPRSTCTRL_RSTRELTLCM70_MASK)
+            self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, SDAAPRSTCTRL_RSTRELTLCM70_MASK
+                                                   | SDAAPRSTCTRL_RSTRELTLCM71_MASK
+                                                   | SDAAPRSTCTRL_RSTRELTLCM72_MASK
+                                                   | SDAAPRSTCTRL_RSTRELTLCM73_MASK)
 
+            # sanity check that the target is still halted
             if self.get_state() == Target.State.RUNNING:
                 raise exceptions.DebugError("Target failed to stay halted during init sequence")
-
-            #
-            # # Disable holding the core in reset, leave MDM halt on
-            # self.mdm_ap.write_reg(MDM_CTRL, MDM_CTRL_DEBUG_REQUEST)
-            #
-            # # Wait until the target is halted
-            # with Timeout(HALT_TIMEOUT) as to:
-            #     while to.check():
-            #         if self.mdm_ap.read_reg(MDM_STATUS) & MDM_STATUS_CORE_HALTED == MDM_STATUS_CORE_HALTED:
-            #             break
-            #         LOG.debug("Waiting for mdm halt")
-            #         sleep(0.01)
-            #     else:
-            #         raise exceptions.TimeoutError("Timed out waiting for core to halt")
-            #
-            # # release MDM halt once it has taken effect in the DHCSR
-            # self.mdm_ap.write_reg(MDM_CTRL, 0)
-            #
-            # # sanity check that the target is still halted
-            # if self.get_state() == Target.State.RUNNING:
-            #     raise exceptions.DebugError("Target failed to stay halted during init sequence")
