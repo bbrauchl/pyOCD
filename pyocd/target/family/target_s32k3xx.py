@@ -62,6 +62,7 @@ SDAAPRSTCTRL_RSTRELTLCM73_MASK  = 0x10000000
 SDAAPRSTCTRL_RSTRELTLCM72_MASK  = 0x08000000
 SDAAPRSTCTRL_RSTRELTLCM71_MASK  = 0x04000000
 SDAAPRSTCTRL_RSTRELTLCM70_MASK  = 0x02000000
+SDAAPRSTCTRL_RSTRELTLCM7n_MASK  = [SDAAPRSTCTRL_RSTRELTLCM70_MASK, SDAAPRSTCTRL_RSTRELTLCM71_MASK, SDAAPRSTCTRL_RSTRELTLCM72_MASK, SDAAPRSTCTRL_RSTRELTLCM73_MASK]
 
 MDM_IDR_EXPECTED = 0x001c0000
 MDM_IDR_VERSION_MASK = 0xf0
@@ -87,6 +88,9 @@ class S32K3XX(CoreSightTarget):
         seq.insert_before('unlock_device',
                         ('s32k3_pre_unlock', self.s32k3_pre_unlock))
 
+        seq.insert_after('unlock_device',
+                        ('s32k3_post_unlock', self.s32k3_post_unlock))
+
         seq.wrap_task('discovery',  lambda seq: seq
 
             .replace_task('find_aps', self.create_s32k344_aps)
@@ -95,14 +99,43 @@ class S32K3XX(CoreSightTarget):
 
             .insert_before('find_components',
                 ('check_mdm_ap_idr', self.check_mdm_ap_idr),
-                ('check_sda_ap_idr', self.check_sda_ap_idr),
-                ('enable_s32K3_debug', self.enable_s32k3_debug))
+                ('check_sda_ap_idr', self.check_sda_ap_idr),)
         )
 
         return seq
 
     def create_s32k344_aps(self):
+        # reading a reserved AP yields a memory transfer fault. Supply a list of expected
+        # aps for the create AP process.
         self.dp.valid_aps = [1, 4, 5, 6, 7]
+
+    def setup_cores(self):
+        pass
+        # sanity check that the target is still halted
+        # if self.get_state() == Target.State.RUNNING:
+        #     raise exceptions.DebugError("Target failed to stay halted during init sequence")
+
+    def _s32k3_sda_ap_assert_core_reset(self, core_num: int, reset_value: bool = False):
+        """@brief assert/deassert core reset in SDA_AP"""
+        if len(SDAAPRSTCTRL_RSTRELTLCM7n_MASK) < core_num:
+            return
+
+        value = self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR)
+        if reset_value == False:
+            # set core bit to 1
+            value = value | SDAAPRSTCTRL_RSTRELTLCM7n_MASK[core_num]
+        else:
+            # set core bit to 0
+            value = value & ~(SDAAPRSTCTRL_RSTRELTLCM7n_MASK[core_num])
+
+        with Timeout(HALT_TIMEOUT) as to:
+            while to.check():
+                LOG.debug("Allow core {} to come out of reset".format(core_num))
+                self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, value)
+                if self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & value == value:
+                    break
+            else:
+                raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
 
     def create_s32k3_cores(self):
         """@brief Create all cores found when scanning
@@ -134,6 +167,7 @@ class S32K3XX(CoreSightTarget):
         LOG.debug("Core APs: {}".format(self.core_aps))
         rom_table_aps = [x for x in self.core_aps if x.rom_table]
         LOG.debug("Filtered APs: {}".format(rom_table_aps))
+
         for ap in rom_table_aps:
             ap.rom_table.for_each(self.create_s32k3_core, lambda c: c.factory == cortex_m.CortexM.factory)
 
@@ -141,6 +175,13 @@ class S32K3XX(CoreSightTarget):
         try:
             LOG.debug("Creating %s component", cmpid.name)
             cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
+
+            # Prior to calling init here we need to release the core from reset to read registers during init if we are under-reset connection mode.
+            if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
+                cmpid.ap.write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
+                cmpid.ap.write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
+                self._s32k3_sda_ap_assert_core_reset(cmp.core_number, False)
+
             cmp.init()
         except exceptions.Error as err:
             LOG.error("Error attempting to create component %s: %s", cmpid.name, err, exc_info=self.session.log_tracebacks)
@@ -179,6 +220,9 @@ class S32K3XX(CoreSightTarget):
         else:
             LOG.error("%s: bad SDA-AP IDR (is 0x%08x)", self.part_number, sda_ap.idr)
 
+    def s32k3_post_unlock(self):
+
+        self.enable_s32k3_debug()
 
     def s32k3_pre_unlock(self):
 
@@ -210,26 +254,6 @@ class S32K3XX(CoreSightTarget):
     def perform_halt_on_connect(self):
         """This init task runs *after* cores are created."""
         if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-
-            for ap in self.dp.aps.values():
-                if ap.core is not None:
-                    ap.write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
-                    ap.write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
-
+            pass
         else:
             super(S32K3XX, self).perform_halt_on_connect()
-
-    def post_connect(self):
-        if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-            if not self.mdm_ap or not self.sda_ap:
-                return
-
-            LOG.debug("Allow core to come out of reaset")
-            self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, SDAAPRSTCTRL_RSTRELTLCM70_MASK
-                                                   | SDAAPRSTCTRL_RSTRELTLCM71_MASK
-                                                   | SDAAPRSTCTRL_RSTRELTLCM72_MASK
-                                                   | SDAAPRSTCTRL_RSTRELTLCM73_MASK)
-
-            # sanity check that the target is still halted
-            if self.get_state() == Target.State.RUNNING:
-                raise exceptions.DebugError("Target failed to stay halted during init sequence")
