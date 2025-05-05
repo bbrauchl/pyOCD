@@ -136,7 +136,7 @@ class S32K3XX(CoreSightTarget):
 
 
     @property
-    def core_ap_idx_array(self) -> List:
+    def core_ap_idx_array(self) -> list:
         return [CM7_0_AHB_AP_IDX, CM7_1_AHB_AP_IDX, CM7_2_AHB_AP_IDX, CM7_3_AHB_AP_IDX]
 
     def create_s32k344_aps(self):
