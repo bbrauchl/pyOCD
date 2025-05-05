@@ -126,6 +126,26 @@ class S32K3XX(CoreSightTarget):
         # if self.get_state() == Target.State.RUNNING:
         #     raise exceptions.DebugError("Target failed to stay halted during init sequence")
 
+    def _s32k3_sda_ap_assert_reset(self, reset_value: bool = False):
+        """@brief assert/deassert all core resets in SDA_AP"""
+
+        value = self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR)
+        if reset_value == False:
+            # set core bits to 1
+            value = value | reduce(lambda item1, item2: item1 | item2, SDAAPRSTCTRL_RSTRELTLCM7n_MASK)
+        else:
+            # set core bits to 0
+            value = value & ~(reduce(lambda item1, item2: item1 | item2, SDAAPRSTCTRL_RSTRELTLCM7n_MASK))
+
+        with Timeout(HALT_TIMEOUT) as to:
+            while to.check():
+                LOG.debug("Allow cores to come out of reset")
+                self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, value)
+                if self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & value == value:
+                    break
+            else:
+                raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
+
     def _s32k3_sda_ap_assert_core_reset(self, core_num: int, reset_value: bool = False):
         """@brief assert/deassert core reset in SDA_AP"""
         if len(SDAAPRSTCTRL_RSTRELTLCM7n_MASK) < core_num:
@@ -185,12 +205,6 @@ class S32K3XX(CoreSightTarget):
                 raise exceptions.TargetError(f"{cmpid.ap.short_description} has multiple cores associated with it")
             cmpid.ap.core = core
 
-            # Prior to calling init here we need to release the core from reset to read registers during init if we are under-reset connection mode.
-            # if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-                # cmpid.ap.write_memory(CortexM.DHCSR, CortexM.DBGKEY | CortexM.C_DEBUGEN | CortexM.C_HALT)
-                # cmpid.ap.write_memory(CortexM.DEMCR, CortexM.DEMCR_VC_CORERESET)
-                # self._s32k3_sda_ap_assert_core_reset(core.core_number, False)
-
             self.add_core(core)
             core.init()
 
@@ -248,16 +262,7 @@ class S32K3XX(CoreSightTarget):
             # Note that in order to perform debug unlock, the device has to come out of reset.
             # Therefore, we write registers to keep the cores in reset and de-assert the reset
             # pin now to allow for debug authentication. Cores will be released later.
-            with Timeout(HALT_TIMEOUT) as to:
-                while to.check():
-                    sda_ap.write_reg(SDAAPRSTCTRL_ADDR, 0)
-                    if 0 == sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & (SDAAPRSTCTRL_RSTRELTLCM70_MASK
-                                                                 | SDAAPRSTCTRL_RSTRELTLCM71_MASK
-                                                                 | SDAAPRSTCTRL_RSTRELTLCM72_MASK
-                                                                 | SDAAPRSTCTRL_RSTRELTLCM73_MASK):
-                        break
-                else:
-                    raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
+            self._s32k3_sda_ap_assert_reset(True)
 
             LOG.debug("Deasserting Reset")
             self.dp.assert_reset(False)
@@ -265,7 +270,11 @@ class S32K3XX(CoreSightTarget):
     def perform_halt_on_connect(self):
         """This init task runs *after* cores are created."""
         if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-            pass
+            for core in self.cores:
+                core.ap.write_memory(CortexM.DHCSR, CortexM.DBGKEY | CortexM.C_DEBUGEN | CortexM.C_HALT)
+                core.ap.write_memory(CortexM.DEMCR, CortexM.DEMCR_VC_CORERESET)
+
+            self._s32k3_sda_ap_assert_reset(False)
         else:
             super(S32K3XX, self).perform_halt_on_connect()
 
