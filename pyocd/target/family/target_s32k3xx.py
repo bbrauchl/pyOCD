@@ -30,7 +30,6 @@ from ...core.target import Target
 from ...coresight.coresight_target import CoreSightTarget
 from ...utility.timeout import Timeout
 from pyocd import coresight
-from functools import reduce
 
 LOG = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ SDAAPRSTCTRL_RSTRELTLCM73_MASK  = 0x10000000
 SDAAPRSTCTRL_RSTRELTLCM72_MASK  = 0x08000000
 SDAAPRSTCTRL_RSTRELTLCM71_MASK  = 0x04000000
 SDAAPRSTCTRL_RSTRELTLCM70_MASK  = 0x02000000
-SDAAPRSTCTRL_RSTRELTLCM7n_MASK  = [SDAAPRSTCTRL_RSTRELTLCM70_MASK, SDAAPRSTCTRL_RSTRELTLCM71_MASK, SDAAPRSTCTRL_RSTRELTLCM72_MASK, SDAAPRSTCTRL_RSTRELTLCM73_MASK]
+SDAAPRSTCTRL_RSTRELTLCM7_ALL_MASK  = SDAAPRSTCTRL_RSTRELTLCM70_MASK | SDAAPRSTCTRL_RSTRELTLCM71_MASK | SDAAPRSTCTRL_RSTRELTLCM72_MASK | SDAAPRSTCTRL_RSTRELTLCM73_MASK
 
 MDM_IDR_EXPECTED = 0x001c0000
 MDM_IDR_VERSION_MASK = 0xf0
@@ -87,6 +86,9 @@ class S32K3XX(CoreSightTarget):
         3:  2,
         8:  3,
     }
+
+    MDM_AP_IDX = 6
+    SDA_AP_IDX = 7
 
     def __init__(self, session, memory_map=None):
         super(S32K3XX, self).__init__(session, memory_map)
@@ -133,36 +135,14 @@ class S32K3XX(CoreSightTarget):
         value = self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR)
         if reset_value == False:
             # set core bits to 1
-            value = value | reduce(lambda item1, item2: item1 | item2, SDAAPRSTCTRL_RSTRELTLCM7n_MASK)
+            value = value | SDAAPRSTCTRL_RSTRELTLCM7_ALL_MASK
         else:
             # set core bits to 0
-            value = value & ~(reduce(lambda item1, item2: item1 | item2, SDAAPRSTCTRL_RSTRELTLCM7n_MASK))
+            value = value & ~(SDAAPRSTCTRL_RSTRELTLCM7_ALL_MASK)
 
         with Timeout(HALT_TIMEOUT) as to:
             while to.check():
                 LOG.debug("Allow cores to come out of reset")
-                self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, value)
-                if self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & value == value:
-                    break
-            else:
-                raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
-
-    def _s32k3_sda_ap_assert_core_reset(self, core_num: int, reset_value: bool = False):
-        """@brief assert/deassert core reset in SDA_AP"""
-        if len(SDAAPRSTCTRL_RSTRELTLCM7n_MASK) < core_num:
-            return
-
-        value = self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR)
-        if reset_value == False:
-            # set core bit to 1
-            value = value | SDAAPRSTCTRL_RSTRELTLCM7n_MASK[core_num]
-        else:
-            # set core bit to 0
-            value = value & ~(SDAAPRSTCTRL_RSTRELTLCM7n_MASK[core_num])
-
-        with Timeout(HALT_TIMEOUT) as to:
-            while to.check():
-                LOG.debug("Allow core {} to come out of reset".format(core_num))
                 self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, value)
                 if self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & value == value:
                     break
@@ -193,13 +173,12 @@ class S32K3XX(CoreSightTarget):
         LOG.debug("Filtered APs: {}".format(valid_dict))
 
         for n, ap in {k: v for k, v in self.dp.aps.items() if v.has_rom_table}.items():
-            f = lambda cmpid: self.create_s32k3_core(cmpid, S32K3XX.CORE_MAPPING.get(n))
+            f = lambda cmpid: self._create_s32k3_core(cmpid, S32K3XX.CORE_MAPPING.get(n))
             ap.rom_table.for_each(f, lambda c: c.factory == CortexM.factory)
 
-    def create_s32k3_core(self, cmpid: CoreSightComponentID, core_number: int):
+    def _create_s32k3_core(self, cmpid: CoreSightComponentID, core_number: int):
         try:
             LOG.debug("Creating %s component", cmpid.name)
-            # cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
             core = CortexM7_S32K3(self.session, cmpid.ap, self.memory_map, core_number, cmpid, cmpid.address)
 
             if cmpid.ap.core is not None:
@@ -220,7 +199,7 @@ class S32K3XX(CoreSightTarget):
             LOG.debug('Not found valid aps, skip MDM-AP check.')
             return
 
-        self.mdm_ap = self.dp.aps[6]
+        self.mdm_ap = self.dp.aps[S32K3XX.MDM_AP_IDX]
 
         # Check MDM-AP ID.
         if (self.mdm_ap.idr & ~MDM_IDR_VERSION_MASK) != MDM_IDR_EXPECTED:
@@ -234,7 +213,8 @@ class S32K3XX(CoreSightTarget):
             LOG.debug("No valid aps found, skipping sda_ap check")
             return
 
-        self.sda_ap = self.dp.aps[7]
+        self.sda_ap = self.dp.aps[S32K3XX.SDA_AP_IDX]
+        self._check_sda_ap_idr(self.sda_ap)
 
     def _check_sda_ap_idr(self, sda_ap):
         if not sda_ap:
@@ -252,9 +232,7 @@ class S32K3XX(CoreSightTarget):
 
     def s32k3_pre_unlock(self):
 
-        sda_ap_apsel = 7
-        sda_ap = ap.AccessPort.create(self.dp, ap.APv1Address(sda_ap_apsel))
-        self.sda_ap = sda_ap
+        sda_ap = ap.AccessPort.create(self.dp, ap.APv1Address(S32K3XX.SDA_AP_IDX))
 
         self._check_sda_ap_idr(sda_ap)
 
