@@ -23,7 +23,7 @@ from time import sleep
 from ...coresight import ap
 from ...coresight import cortex_m
 from ...coresight.cortex_m import CortexM
-from ...coresight.core_ids import (CortexMExtension, CoreArchitecture)
+from ...coresight.core_ids import (CORE_TYPE_NAME, CortexMExtension, CoreArchitecture)
 from ...coresight.rom_table import CoreSightComponentID
 from ...core import exceptions
 from ...core.target import Target
