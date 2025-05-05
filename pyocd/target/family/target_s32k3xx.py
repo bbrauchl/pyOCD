@@ -22,6 +22,7 @@ from time import sleep
 
 from ...coresight import ap
 from ...coresight import cortex_m
+form ...coresight.cortex_m import CortexM
 from ...coresight.rom_table import CoreSightComponentID
 from ...core import exceptions
 from ...core.target import Target
@@ -171,23 +172,23 @@ class S32K3XX(CoreSightTarget):
 
         for n, ap in {k: v for k, v in self.dp.aps.items() if v.has_rom_table}.items():
             f = lambda cmpid: self.create_s32k3_core(cmpid, S32K3XX.CORE_MAPPING.get(n))
-            ap.rom_table.for_each(f, lambda c: c.factory == cortex_m.CortexM.factory)
+            ap.rom_table.for_each(f, lambda c: c.factory == CortexM.factory)
 
     def create_s32k3_core(self, cmpid: CoreSightComponentID, core_number: int):
         try:
             LOG.debug("Creating %s component", cmpid.name)
             # cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
-            core = cortex_m.CortexM(self.session, cmpid.ap, self.memory_map, core_number, cmpid, cmpid.address)
+            core = CortexM7_S32K3(self.session, cmpid.ap, self.memory_map, core_number, cmpid, cmpid.address)
 
             if cmpid.ap.core is not None:
                 raise exceptions.TargetError(f"{cmpid.ap.short_description} has multiple cores associated with it")
             cmpid.ap.core = core
 
             # Prior to calling init here we need to release the core from reset to read registers during init if we are under-reset connection mode.
-            if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-                cmpid.ap.write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
-                cmpid.ap.write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
-                self._s32k3_sda_ap_assert_core_reset(core.core_number, False)
+            # if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
+                # cmpid.ap.write_memory(CortexM.DHCSR, CortexM.DBGKEY | CortexM.C_DEBUGEN | CortexM.C_HALT)
+                # cmpid.ap.write_memory(CortexM.DEMCR, CortexM.DEMCR_VC_CORERESET)
+                # self._s32k3_sda_ap_assert_core_reset(core.core_number, False)
 
             self.add_core(core)
             core.init()
@@ -266,3 +267,50 @@ class S32K3XX(CoreSightTarget):
             pass
         else:
             super(S32K3XX, self).perform_halt_on_connect()
+
+
+class CortexM7_S32K3(CortexM):
+
+    def _read_core_type(self) -> None:
+        """
+        @brief Read the CPUID register and determine core type and architecture.
+
+        On S32K3XX, we can read the CPUID register but not ISAR3 or MPU_TYPE
+        while the core is in reset. This occurs durring connect under-reset as
+        well as when a core is not enabled out of reset (cascade boot).
+
+        Therefore, we will hard code these feature registers so that core can be
+        created even when the core is in reset.
+        """
+        # Read CPUID register
+        cpuid_cb = self.read32(CortexM.CPUID, now=False)
+
+        # Check CPUID
+        cpuid = cpuid_cb()
+        implementer = (cpuid & CortexM.CPUID_IMPLEMENTER_MASK) >> CortexM.CPUID_IMPLEMENTER_POS
+        arch = (cpuid & CortexM.CPUID_ARCHITECTURE_MASK) >> CortexM.CPUID_ARCHITECTURE_POS
+        self.core_type = (cpuid & CortexM.CPUID_PARTNO_MASK) >> CortexM.CPUID_PARTNO_POS
+        self.cpu_revision = (cpuid & CortexM.CPUID_VARIANT_MASK) >> CortexM.CPUID_VARIANT_POS
+        self.cpu_patch = (cpuid & CortexM.CPUID_REVISION_MASK) >> CortexM.CPUID_REVISION_POS
+
+        # Check for DSP extension
+        isar3 = 0x1111131
+        isar3_simd = (isar3 & self.ISAR3_SIMD_MASK) >> self.ISAR3_SIMD_SHIFT
+        if isar3_simd == self.ISAR3_SIMD__DSP:
+            self._extensions.append(CortexMExtension.DSP)
+
+        # Check for MPU extension
+        mpu_type = 0x1000
+        mpu_type_dregions = (mpu_type & self.MPU_TYPE_DREGIONS_MASK) >> self.MPU_TYPE_DREGIONS_SHIFT
+        if mpu_type_dregions > 0:
+            self._extensions.append(CortexMExtension.MPU)
+
+        # Set the arch version.
+        if arch == CortexM.ARMv7M:
+            self._architecture = CoreArchitecture.ARMv7M
+            self._arch_version = (7, 0)
+        else:
+            self._architecture = CoreArchitecture.ARMv6M
+            self._arch_version = (6, 0)
+
+        self._core_name = CORE_TYPE_NAME.get((implementer, self.core_type), f"Unknown (CPUID={cpuid:#010x})")
