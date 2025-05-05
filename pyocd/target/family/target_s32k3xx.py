@@ -143,6 +143,7 @@ class S32K3XX(CoreSightTarget):
         # reading a reserved AP yields a memory transfer fault. Supply a list of expected
         # aps for the create AP process.
         self.dp.valid_aps = [S32K3XX.ABP_AP_IDX, S32K3XX.MDM_AP_IDX, S32K3XX.SDA_AP_IDX] + self.core_ap_idx_array
+        LOG.info("setting valid aps: {}".format(self.dp.valid_aps))
 
     def _s32k3_sda_ap_assert_reset(self, sda_ap: AccessPort, reset_value: bool = False):
         """@brief assert/deassert all core resets in SDA_AP"""
