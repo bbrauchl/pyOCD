@@ -18,12 +18,14 @@
 # limitations under the License.
 
 import logging
+from time import sleep
 
 from ...coresight.ap import (AccessPort, APv1Address)
 from ...coresight.cortex_m import CortexM
 from ...coresight.core_ids import (CORE_TYPE_NAME, CortexMExtension, CoreArchitecture)
 from ...coresight.rom_table import CoreSightComponentID
 from ...core import exceptions
+from ...coresight.coresight_target import CoreSightTarget
 from ...utility.timeout import Timeout
 
 LOG = logging.getLogger(__name__)
@@ -56,6 +58,13 @@ SDAAPRSTCTRL_RSTRELTLCM7_ALL_MASK  = SDAAPRSTCTRL_RSTRELTLCM70_MASK | SDAAPRSTCT
 
 MDM_IDR_EXPECTED = 0x001c0000
 MDM_IDR_VERSION_MASK = 0xf0
+MDM_IDR_VERSION_SHIFT = 4
+
+HALT_TIMEOUT = 2.0
+
+class S32K3XX(CoreSightTarget):
+    """@brief Family class for NXP S32K3xx devices.
+    """
 
     VENDOR = "NXP"
 
