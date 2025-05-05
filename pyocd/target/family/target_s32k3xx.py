@@ -152,10 +152,7 @@ class S32K3XX(CoreSightTarget):
 
         For now, we will used a hard-coded core definition from the derivative class, and create multiple
         derivative classes for each core configuration. (S32K388 vs S32K388LS)
-
-        TODO: Maybe the lockstep status of the cores can be detected here rather than hardcoded in the child.
-        This can be read from DCMROF19[29]. This also will make it clear if cores are misconfigured as core 1
-        will not be registered if the device configured in LS.
+        Turns out, the AP will error out during discovery, we may not even have to deal with this.
         """
         # we need to manually adjust the order here as the cores are not in order on the debug interface
         LOG.debug("All Found APs: {}".format(self.dp.aps))
@@ -165,7 +162,7 @@ class S32K3XX(CoreSightTarget):
         self.core_aps = [self.dp.aps.get(x) for x in self.core_aps]
 
         LOG.debug("Core APs: {}".format(self.core_aps))
-        rom_table_aps = [x for x in self.core_aps if x.rom_table]
+        rom_table_aps = [x for x in self.core_aps if x.has_rom_table]
         LOG.debug("Filtered APs: {}".format(rom_table_aps))
 
         for ap in rom_table_aps:
