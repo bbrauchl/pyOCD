@@ -514,6 +514,10 @@ class S32K344(S32K3XX):
     def __init__(self, session):
         super(S32K344, self).__init__(session, self.MEMORY_MAP)
 
+    @property
+    def core_ap_idx_array(self) -> list:
+        return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_1_AHB_AP_IDX]
+
     def reset(self, reset_type=None):
         super(S32K344, self).reset(self.ResetType.SW_VECTRESET)
 
