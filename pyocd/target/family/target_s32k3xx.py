@@ -18,28 +18,15 @@
 # limitations under the License.
 
 import logging
-from time import sleep
 
 from ...coresight.ap import (AccessPort, APv1Address)
 from ...coresight.cortex_m import CortexM
 from ...coresight.core_ids import (CORE_TYPE_NAME, CortexMExtension, CoreArchitecture)
 from ...coresight.rom_table import CoreSightComponentID
 from ...core import exceptions
-from ...core.target import Target
-from ...coresight.coresight_target import CoreSightTarget
 from ...utility.timeout import Timeout
-from pyocd import coresight
-from abc import abstractmethod
 
 LOG = logging.getLogger(__name__)
-
-# When scanning S32K3xx device, we may find 1-4 cores (depending on variant) with the following mapping:
-# Core 0 - AP#4
-# Core 1 - AP#5
-# Core 2 - AP#3
-# Core 3 - AP#8
-# Maybe this should somehow be device specific....
-CORE_AP_ORDERING = [4, 5, 3, 8]
 
 SDA_AP_IDR_EXPECTED = 0x001c0040
 
@@ -69,13 +56,6 @@ SDAAPRSTCTRL_RSTRELTLCM7_ALL_MASK  = SDAAPRSTCTRL_RSTRELTLCM70_MASK | SDAAPRSTCT
 
 MDM_IDR_EXPECTED = 0x001c0000
 MDM_IDR_VERSION_MASK = 0xf0
-MDM_IDR_VERSION_SHIFT = 4
-
-HALT_TIMEOUT = 2.0
-
-class S32K3XX(CoreSightTarget):
-    """@brief Family class for NXP S32K3xx devices.
-    """
 
     VENDOR = "NXP"
 

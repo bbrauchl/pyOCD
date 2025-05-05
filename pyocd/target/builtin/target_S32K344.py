@@ -18,46 +18,6 @@ from ...coresight.coresight_target import CoreSightTarget
 from ..family.target_s32k3xx import S32K3XX
 from ...core.memory_map import (FlashRegion, RamRegion, MemoryMap)
 
-# AP IDs:
-# [1]   APB_AP
-# [4]   CM7_0_AHB_AP
-# [6]   MDM_AP
-# [7]   SDA_AP
-APB_AP_ID       = 1
-CM7_0_AHB_AP_ID = 4
-MDM_AP_ID       = 6
-SDA_AP_ID       = 7
-AP_ID_LIST      = [APB_AP_ID, CM7_0_AHB_AP_ID, MDM_AP_ID, SDA_AP_ID]
-
-# SDA_AP registers:
-# [0x80]    Debug Enable Control (DBGENCTRL)
-SDA_AP_DBGENCTRL_ADDR   = 0x80
-
-# SDA_AP DBGENCTRL bit fields:
-# [31:30]   reserved
-# [29]      Core Non-Invasive Debug Enable (CNIDEN)
-# [28]      Core Debug Enable (CDBGEN)
-# [27:8]    reserved
-# [7]       Global Secure Privileged Non-Invasive Debug Enable (GSPNIDEN)
-# [6]       Global Secure Privileged Debug Enable (GSPIDEN)
-# [5]       Global Non-Invasive Debug Enable (GNIDEN)
-# [4]       Global Debug Enable (GDBGEN)
-# [3:0]     reserved
-SDA_AP_CNIDEN_MASK      = 0x20000000
-SDA_AP_CNIDEN_SHIFT     = 29
-SDA_AP_CDBGEN_MASK      = 0x10000000
-SDA_AP_CDBGEN_SHIFT     = 28
-SDA_AP_GSPNIDEN_MASK    = 0x80
-SDA_AP_GSPNIDEN_SHIFT   = 7
-SDA_AP_GSPIDEN_MASK     = 0x40
-SDA_AP_GSPIDEN_SHIFT    = 6
-SDA_AP_GNIDEN_MASK      = 0x20
-SDA_AP_GNIDEN_SHIFT     = 5
-SDA_AP_GDBGEN_MASK      = 0x10
-SDA_AP_GDBGEN_SHIFT     = 4
-SDA_AP_EN_ALL           = (SDA_AP_CNIDEN_MASK | SDA_AP_CDBGEN_MASK | SDA_AP_GSPNIDEN_MASK |
-                           SDA_AP_GSPIDEN_MASK | SDA_AP_GNIDEN_MASK | SDA_AP_GDBGEN_MASK)
-
 FLASH_ALGO_CODE = {
     'load_address' : 0x20000000,
 
@@ -516,7 +476,7 @@ class S32K344(S32K3XX):
 
     @property
     def core_ap_idx_array(self) -> list:
-        return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_1_AHB_AP_IDX]
+        return [S32K3XX.CM7_0_AHB_AP_IDX]
 
     def reset(self, reset_type=None):
         super(S32K344, self).reset(self.ResetType.SW_VECTRESET)
@@ -526,18 +486,5 @@ class S32K344(S32K3XX):
 
     def create_init_sequence(self):
         seq = super(S32K344, self).create_init_sequence()
-
-        # seq.wrap_task('discovery',
-        #     lambda seq: seq
-        #         # Normally the discovery sequence will scan for APs and then add those found
-        #         # to a list. Unfortunately, the S32K344 freaks out when you scan for nonexistent
-        #         # APs, so the list of APs are provided statically here.
-        #         .replace_task('find_aps', self.create_s32k344_aps)
-        #
-        #         # Debug needs to be enabled in the SDA_AP before pyOCD can probe for
-        #         # components.
-        #         .insert_before('find_components',
-        #             ('enable_debug', self.enable_s32k344_debug))
-        # )
 
         return seq
