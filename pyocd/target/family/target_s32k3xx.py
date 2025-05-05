@@ -20,6 +20,8 @@
 import logging
 from time import sleep
 
+from pyocd.target.builtin.target_S32K344 import CM7_0_AHB_AP_ID
+
 from ...coresight.ap import (AccessPort, APv1Address)
 from ...coresight.cortex_m import CortexM
 from ...coresight.core_ids import (CORE_TYPE_NAME, CortexMExtension, CoreArchitecture)
@@ -29,6 +31,7 @@ from ...core.target import Target
 from ...coresight.coresight_target import CoreSightTarget
 from ...utility.timeout import Timeout
 from pyocd import coresight
+from abc import abstractmethod
 
 LOG = logging.getLogger(__name__)
 
@@ -86,8 +89,22 @@ class S32K3XX(CoreSightTarget):
         8:  3,
     }
 
+    ABP_AP_IDX = 1
+    CM7_0_AHB_AP_IDX = 4
+    CM7_1_AHB_AP_IDX = 5
+    CM7_2_AHB_AP_IDX = 6
+    CM7_3_AHB_AP_IDX = 8
     MDM_AP_IDX = 6
     SDA_AP_IDX = 7
+
+    CORE_MAPPING = {
+    # AP |  Core Number
+        CM7_0_AHB_AP_IDX:  0,
+        CM7_1_AHB_AP_IDX:  1,
+        CM7_2_AHB_AP_IDX:  2,
+        CM7_3_AHB_AP_IDX:  3,
+    }
+
 
     def __init__(self, session, memory_map=None):
         super(S32K3XX, self).__init__(session, memory_map)
@@ -119,16 +136,15 @@ class S32K3XX(CoreSightTarget):
 
         return seq
 
+
+    @property
+    def core_ap_idx_array(self) -> List:
+        return [CM7_0_AHB_AP_IDX, CM7_1_AHB_AP_IDX, CM7_2_AHB_AP_IDX, CM7_3_AHB_AP_IDX]
+
     def create_s32k344_aps(self):
         # reading a reserved AP yields a memory transfer fault. Supply a list of expected
         # aps for the create AP process.
-        self.dp.valid_aps = [1, 4, 5, 6, 7]
-
-    def setup_cores(self):
-        pass
-        # sanity check that the target is still halted
-        # if self.get_state() == Target.State.RUNNING:
-        #     raise exceptions.DebugError("Target failed to stay halted during init sequence")
+        self.dp.valid_aps = [ABP_AP_IDX, MDM_AP_IDX, SDA_AP_IDX] + self.core_ap_idx_array
 
     def _s32k3_sda_ap_assert_reset(self, sda_ap: AccessPort, reset_value: bool = False):
         """@brief assert/deassert all core resets in SDA_AP"""
@@ -151,7 +167,8 @@ class S32K3XX(CoreSightTarget):
                 raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
 
     def create_s32k3_cores(self):
-        """@brief Create all cores found when scanning
+        """
+        @brief Create all cores found when scanning
 
         This task creates cores from the scanned APs.
 
