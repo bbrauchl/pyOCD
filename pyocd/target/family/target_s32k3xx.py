@@ -137,12 +137,12 @@ class S32K3XX(CoreSightTarget):
 
     @property
     def core_ap_idx_array(self) -> list:
-        return [CM7_0_AHB_AP_IDX, CM7_1_AHB_AP_IDX, CM7_2_AHB_AP_IDX, CM7_3_AHB_AP_IDX]
+        return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_1_AHB_AP_IDX, S32K3XX.CM7_2_AHB_AP_IDX, S32K3XX.CM7_3_AHB_AP_IDX]
 
     def create_s32k344_aps(self):
         # reading a reserved AP yields a memory transfer fault. Supply a list of expected
         # aps for the create AP process.
-        self.dp.valid_aps = [ABP_AP_IDX, MDM_AP_IDX, SDA_AP_IDX] + self.core_ap_idx_array
+        self.dp.valid_aps = [S32K3XX.ABP_AP_IDX, S32K3XX.MDM_AP_IDX, S32K3XX.SDA_AP_IDX] + self.core_ap_idx_array
 
     def _s32k3_sda_ap_assert_reset(self, sda_ap: AccessPort, reset_value: bool = False):
         """@brief assert/deassert all core resets in SDA_AP"""
