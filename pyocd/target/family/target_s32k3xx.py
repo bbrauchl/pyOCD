@@ -187,7 +187,7 @@ class S32K3XX(CoreSightTarget):
             if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
                 cmpid.ap.write_memory(cortex_m.CortexM.DHCSR, cortex_m.CortexM.DBGKEY | cortex_m.CortexM.C_DEBUGEN | cortex_m.CortexM.C_HALT)
                 cmpid.ap.write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
-                self._s32k3_sda_ap_assert_core_reset(cmp.core_number, False)
+                self._s32k3_sda_ap_assert_core_reset(core.core_number, False)
 
             self.add_core(core)
             core.init()
