@@ -283,6 +283,7 @@ class CortexM7_S32K3(CortexM):
         Therefore, we will hard code these feature registers so that core can be
         created even when the core is in reset.
         """
+        LOG.info("Reading S32K3 core info")
         # Read CPUID register
         cpuid_cb = self.read32(CortexM.CPUID, now=False)
 
