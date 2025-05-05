@@ -30,6 +30,7 @@ from ...core.target import Target
 from ...coresight.coresight_target import CoreSightTarget
 from ...utility.timeout import Timeout
 from pyocd import coresight
+from functools import reduce
 
 LOG = logging.getLogger(__name__)
 
