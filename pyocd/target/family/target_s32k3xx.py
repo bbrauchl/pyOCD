@@ -107,12 +107,14 @@ class S32K3XX(CoreSightTarget):
         seq.wrap_task('discovery',  lambda seq: seq
 
             .replace_task('find_aps', self.create_s32k344_aps)
+            .insert_before('find_components',
+                ('check_mdm_ap_idr', self.check_mdm_ap_idr),
+                ('check_sda_ap_idr', self.check_sda_ap_idr),
+                ('enable_debug', self.enable_s32k3_debug),
+            )
             # Cores are not in order in DAP, so we need to number them manually
             .replace_task('create_cores', self.create_s32k3_cores)
 
-            .insert_before('find_components',
-                ('check_mdm_ap_idr', self.check_mdm_ap_idr),
-                ('check_sda_ap_idr', self.check_sda_ap_idr),)
         )
 
         return seq
@@ -226,8 +228,7 @@ class S32K3XX(CoreSightTarget):
             LOG.error("%s: bad SDA-AP IDR (is 0x%08x)", self.part_number, sda_ap.idr)
 
     def s32k3_post_unlock(self):
-
-        self.enable_s32k3_debug()
+        pass
 
     def s32k3_pre_unlock(self):
 
