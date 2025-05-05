@@ -76,6 +76,14 @@ class S32K3XX(CoreSightTarget):
 
     VENDOR = "NXP"
 
+    CORE_MAPPING = {
+    # AP |  Core Number
+        4:  0,
+        5:  1,
+        3:  2,
+        8:  3,
+    }
+
     def __init__(self, session, memory_map=None):
         super(S32K3XX, self).__init__(session, memory_map)
         self.mdm_ap = None
@@ -157,16 +165,12 @@ class S32K3XX(CoreSightTarget):
         # we need to manually adjust the order here as the cores are not in order on the debug interface
         LOG.debug("All Found APs: {}".format(self.dp.aps))
 
-        # When scanning S32K3xx device, we may find 1-4 cores (depending on variant)
-        self.core_aps = filter(lambda x: x in self.dp.aps.keys(), CORE_AP_ORDERING)
-        self.core_aps = [self.dp.aps.get(x) for x in self.core_aps]
+        valid_dict = {k: v for k, v in self.dp.aps.items() if v.has_rom_table}
+        LOG.debug("Filtered APs: {}".format(valid_dict))
 
-        LOG.debug("Core APs: {}".format(self.core_aps))
-        rom_table_aps = [x for x in self.core_aps if x.has_rom_table]
-        LOG.debug("Filtered APs: {}".format(rom_table_aps))
-
-        for ap in rom_table_aps:
-            ap.rom_table.for_each(self.create_s32k3_core, lambda c: c.factory == cortex_m.CortexM.factory)
+        for n, ap in {k: v for k, v in self.dp.aps.items() if v.has_rom_table}.items():
+            f = lambda cmpid: self.create_s32k3_core(cmpid, S32K3XX.CORE_MAPPING.get(n))
+            ap.rom_table.for_each(f, lambda c: c.factory == cortex_m.CortexM.factory)
 
     def create_s32k3_core(self, cmpid):
         try:
