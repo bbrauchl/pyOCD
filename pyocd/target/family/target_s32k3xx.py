@@ -22,7 +22,7 @@ from time import sleep
 
 from ...coresight import ap
 from ...coresight import cortex_m
-form ...coresight.cortex_m import CortexM
+from ...coresight.cortex_m import CortexM
 from ...coresight.rom_table import CoreSightComponentID
 from ...core import exceptions
 from ...core.target import Target
