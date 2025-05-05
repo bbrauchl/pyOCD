@@ -271,7 +271,7 @@ class S32K3XX(CoreSightTarget):
     def perform_halt_on_connect(self):
         """This init task runs *after* cores are created."""
         if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
-            for core in self.cores:
+            for core in self.cores.values():
                 core.ap.write_memory(CortexM.DHCSR, CortexM.DBGKEY | CortexM.C_DEBUGEN | CortexM.C_HALT)
                 core.ap.write_memory(CortexM.DEMCR, CortexM.DEMCR_VC_CORERESET)
 
