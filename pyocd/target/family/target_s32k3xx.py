@@ -20,8 +20,7 @@
 import logging
 from time import sleep
 
-from ...coresight import ap
-from ...coresight import cortex_m
+from ...coresight.ap import (AccessPort, APv1Address)
 from ...coresight.cortex_m import CortexM
 from ...coresight.core_ids import (CORE_TYPE_NAME, CortexMExtension, CoreArchitecture)
 from ...coresight.rom_table import CoreSightComponentID
@@ -129,10 +128,10 @@ class S32K3XX(CoreSightTarget):
         # if self.get_state() == Target.State.RUNNING:
         #     raise exceptions.DebugError("Target failed to stay halted during init sequence")
 
-    def _s32k3_sda_ap_assert_reset(self, reset_value: bool = False):
+    def _s32k3_sda_ap_assert_reset(self, sda_ap: AccessPort, reset_value: bool = False):
         """@brief assert/deassert all core resets in SDA_AP"""
 
-        value = self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR)
+        value = sda_ap.read_reg(SDAAPRSTCTRL_ADDR)
         if reset_value == False:
             # set core bits to 1
             value = value | SDAAPRSTCTRL_RSTRELTLCM7_ALL_MASK
@@ -143,8 +142,8 @@ class S32K3XX(CoreSightTarget):
         with Timeout(HALT_TIMEOUT) as to:
             while to.check():
                 LOG.debug("Allow cores to come out of reset")
-                self.sda_ap.write_reg(SDAAPRSTCTRL_ADDR, value)
-                if self.sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & value == value:
+                sda_ap.write_reg(SDAAPRSTCTRL_ADDR, value)
+                if sda_ap.read_reg(SDAAPRSTCTRL_ADDR) & value == value:
                     break
             else:
                 raise exceptions.TimeoutError("Timed out attempting to set write SDAAPRSTCTRL")
@@ -216,7 +215,7 @@ class S32K3XX(CoreSightTarget):
         self.sda_ap = self.dp.aps[S32K3XX.SDA_AP_IDX]
         self._check_sda_ap_idr(self.sda_ap)
 
-    def _check_sda_ap_idr(self, sda_ap):
+    def _check_sda_ap_idr(self, sda_ap: AccessPort):
         if not sda_ap:
             LOG.debug("No valid ap, skipping sda_ap check")
             return
@@ -232,7 +231,7 @@ class S32K3XX(CoreSightTarget):
 
     def s32k3_pre_unlock(self):
 
-        sda_ap = ap.AccessPort.create(self.dp, ap.APv1Address(S32K3XX.SDA_AP_IDX))
+        sda_ap = AccessPort.create(self.dp, APv1Address(S32K3XX.SDA_AP_IDX))
 
         self._check_sda_ap_idr(sda_ap)
 
@@ -241,7 +240,7 @@ class S32K3XX(CoreSightTarget):
             # Note that in order to perform debug unlock, the device has to come out of reset.
             # Therefore, we write registers to keep the cores in reset and de-assert the reset
             # pin now to allow for debug authentication. Cores will be released later.
-            self._s32k3_sda_ap_assert_reset(True)
+            self._s32k3_sda_ap_assert_reset(sda_ap, True)
 
             LOG.debug("Deasserting Reset")
             self.dp.assert_reset(False)
@@ -253,7 +252,7 @@ class S32K3XX(CoreSightTarget):
                 core.ap.write_memory(CortexM.DHCSR, CortexM.DBGKEY | CortexM.C_DEBUGEN | CortexM.C_HALT)
                 core.ap.write_memory(CortexM.DEMCR, CortexM.DEMCR_VC_CORERESET)
 
-            self._s32k3_sda_ap_assert_reset(False)
+            self._s32k3_sda_ap_assert_reset(self.sda_ap, False)
         else:
             super(S32K3XX, self).perform_halt_on_connect()
 
