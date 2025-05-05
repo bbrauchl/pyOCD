@@ -90,7 +90,7 @@ class S32K3XX(CoreSightTarget):
     ABP_AP_IDX = 1
     CM7_0_AHB_AP_IDX = 4
     CM7_1_AHB_AP_IDX = 5
-    CM7_2_AHB_AP_IDX = 6
+    CM7_2_AHB_AP_IDX = 3
     CM7_3_AHB_AP_IDX = 8
     MDM_AP_IDX = 6
     SDA_AP_IDX = 7
