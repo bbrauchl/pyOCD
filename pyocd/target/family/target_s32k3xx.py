@@ -20,8 +20,6 @@
 import logging
 from time import sleep
 
-from pyocd.target.builtin.target_S32K344 import CM7_0_AHB_AP_ID
-
 from ...coresight.ap import (AccessPort, APv1Address)
 from ...coresight.cortex_m import CortexM
 from ...coresight.core_ids import (CORE_TYPE_NAME, CortexMExtension, CoreArchitecture)
