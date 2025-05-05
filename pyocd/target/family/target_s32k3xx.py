@@ -22,6 +22,7 @@ from time import sleep
 
 from ...coresight import ap
 from ...coresight import cortex_m
+from ...coresignt.rom_table import CoreSightComponentID
 from ...core import exceptions
 from ...core.target import Target
 from ...coresight.coresight_target import CoreSightTarget
@@ -172,10 +173,15 @@ class S32K3XX(CoreSightTarget):
             f = lambda cmpid: self.create_s32k3_core(cmpid, S32K3XX.CORE_MAPPING.get(n))
             ap.rom_table.for_each(f, lambda c: c.factory == cortex_m.CortexM.factory)
 
-    def create_s32k3_core(self, cmpid):
+    def create_s32k3_core(self, cmpid: CoreSightComponentID, core_number: int):
         try:
             LOG.debug("Creating %s component", cmpid.name)
-            cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
+            # cmp = cmpid.factory(cmpid.ap, cmpid, cmpid.address)
+            core = cortex_m.CortexM(self.session, cmpid.ap, self.memory_map, core_number, cmpid, cmpid.address)
+
+            if cmpid.ap.core is not None:
+                raise exceptions.TargetError(f"{cmpid.ap.short_description} has multiple cores associated with it")
+            cmpid.ap.core = core
 
             # Prior to calling init here we need to release the core from reset to read registers during init if we are under-reset connection mode.
             if self.session.options.get('connect_mode') == 'under-reset' or self._force_halt_on_connect:
@@ -183,7 +189,9 @@ class S32K3XX(CoreSightTarget):
                 cmpid.ap.write_memory(cortex_m.CortexM.DEMCR, cortex_m.CortexM.DEMCR_VC_CORERESET)
                 self._s32k3_sda_ap_assert_core_reset(cmp.core_number, False)
 
-            cmp.init()
+            self.add_core(core)
+            core.init()
+
         except exceptions.Error as err:
             LOG.error("Error attempting to create component %s: %s", cmpid.name, err, exc_info=self.session.log_tracebacks)
 
