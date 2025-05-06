@@ -97,7 +97,7 @@ FLASH_ALGO = {
     'pc_eraseAll': 0x120000003,
 
     'static_base' : 0x20000000 + 0x00000004 + 0x000006f0,
-    'begin_stack' : 0x200018c0,
+    'begin_stack' : 0x200028c0,
     'end_stack' : 0x200008c0,
     'begin_data' : 0x20000000 + 0x1000,
     'page_size' : 0x80,
