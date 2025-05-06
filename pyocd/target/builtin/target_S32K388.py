@@ -465,7 +465,7 @@ class S32K388(S32K3XX):
     VENDOR = "NXP"
 
     MEMORY_MAP = MemoryMap(
-        FlashRegion(name="pflash",  start=0x00400000, end=0xBfffff, blocksize=0x2000, is_boot_memory=True, algo=FLASH_ALGO_CODE),
+        FlashRegion(name="pflash",  start=0x00400000, end=0xbfffff, blocksize=0x2000, is_boot_memory=True, algo=FLASH_ALGO_CODE),
         FlashRegion(name="dflash",  start=0x10000000, end=0x1001ffff, blocksize=0x2000, algo=FLASH_ALGO_DATA),
         RamRegion(name="itcm",      start=0x00000000, length=0x10000), # 64 KB
         RamRegion(name="dtcm",      start=0x20000000, length=0x20000), # 128 KB
