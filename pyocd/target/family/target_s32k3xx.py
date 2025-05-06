@@ -18,7 +18,6 @@
 # limitations under the License.
 
 import logging
-from time import sleep
 
 from ...coresight.ap import (AccessPort, APv1Address)
 from ...coresight.cortex_m import CortexM
