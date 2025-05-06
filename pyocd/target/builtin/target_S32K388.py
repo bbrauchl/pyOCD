@@ -460,7 +460,7 @@ FLASH_ALGO_DATA = {
     )
 }
 
-class S32K388(CoreSightTarget):
+class S32K388(S32K3XX):
 
     VENDOR = "NXP"
 
