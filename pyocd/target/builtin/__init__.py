@@ -210,7 +210,7 @@ BUILTIN_TARGETS = {
           'nrf91' : target_nRF91xx.NRF91XX,
           's32k312': target_S32K312.S32K312,
           's32k344': target_S32K344.S32K344,
-          's32k388': target_S32K358.S32K358,
+          's32k358': target_S32K358.S32K358,
           's32k388': target_S32K388.S32K388,
           'stm32f103rc': target_STM32F103RC.STM32F103RC,
           'stm32f051': target_STM32F051T8.STM32F051,
