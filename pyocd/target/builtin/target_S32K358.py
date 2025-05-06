@@ -131,7 +131,7 @@ class S32K344(S32K3XX):
     VENDOR = "NXP"
 
     MEMORY_MAP = MemoryMap(
-        FlashRegion(name="pflash",  start=0x00400000, end=0x7fffff, blocksize=0x2000, is_boot_memory=True, algo=FLASH_ALGO),
+        FlashRegion(name="pflash",  start=0x00400000, end=0xbfffff, blocksize=0x2000, is_boot_memory=True, algo=FLASH_ALGO),
         FlashRegion(name="dflash",  start=0x10000000, end=0x1001ffff, blocksize=0x2000, algo=FLASH_ALGO),
         RamRegion(name="itcm",      start=0x00000000, length=0x10000), # 64 KB
         RamRegion(name="dtcm",      start=0x20000000, length=0x20000), # 128 KB
@@ -143,7 +143,7 @@ class S32K344(S32K3XX):
 
     @property
     def core_ap_idx_array(self) -> list:
-        return [S32K3XX.CM7_0_AHB_AP_IDX]
+        return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_2_AHB_AP_IDX]
 
     def reset(self, reset_type=None):
         super(S32K344, self).reset(self.ResetType.SW_VECTRESET)
