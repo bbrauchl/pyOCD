@@ -15,7 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ...coresight.coresight_target import CoreSightTarget
 from ..family.target_s32k3xx import S32K3XX
 from ...core.memory_map import (FlashRegion, RamRegion, MemoryMap)
 
@@ -130,8 +129,8 @@ class S32K358(S32K3XX):
     VENDOR = "NXP"
 
     MEMORY_MAP = MemoryMap(
-        FlashRegion(name="pflash",  start=0x00400000, end=0xbfffff, blocksize=0x2000, is_boot_memory=True, algo=FLASH_ALGO),
-        FlashRegion(name="dflash",  start=0x10000000, end=0x1001ffff, blocksize=0x2000, algo=FLASH_ALGO),
+        FlashRegion(name="pflash",  start=0x00400000, end=0xbfffff, blocksize=0x2000, page_size=FLASH_ALGO.get('page_sieze'), is_boot_memory=True, algo=FLASH_ALGO),
+        FlashRegion(name="dflash",  start=0x10000000, end=0x1001ffff, blocksize=0x2000, page_size=FLASH_ALGO.get('page_sieze'), algo=FLASH_ALGO),
         RamRegion(name="itcm",      start=0x00000000, length=0x10000), # 64 KB
         RamRegion(name="dtcm",      start=0x20000000, length=0x20000), # 128 KB
         RamRegion(name="sram",      start=0x20400000, length=0x50000), # 320 KB
