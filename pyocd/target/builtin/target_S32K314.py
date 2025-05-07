@@ -18,7 +18,7 @@
 from ..family.target_s32k3xx import (S32K3XX, FLASH_ALGO)
 from ...core.memory_map import (FlashRegion, RamRegion, MemoryMap)
 
-class S32K324(S32K3XX):
+class S32K314(S32K3XX):
 
     VENDOR = "NXP"
 
@@ -31,19 +31,19 @@ class S32K324(S32K3XX):
         )
 
     def __init__(self, session):
-        super(S32K324, self).__init__(session, self.MEMORY_MAP)
+        super(S32K314, self).__init__(session, self.MEMORY_MAP)
 
     @property
     def core_ap_idx_array(self) -> list:
-        return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_1_AHB_AP_IDX]
+        return [S32K3XX.CM7_0_AHB_AP_IDX]
 
     def reset(self, reset_type=None):
-        super(S32K324, self).reset(self.ResetType.SW_VECTRESET)
+        super(S32K314, self).reset(self.ResetType.SW_VECTRESET)
 
     def reset_and_halt(self, reset_type=None, map_to_user=True):
-        super(S32K324, self).reset_and_halt(self.ResetType.SW_VECTRESET)
+        super(S32K314, self).reset_and_halt(self.ResetType.SW_VECTRESET)
 
     def create_init_sequence(self):
-        seq = super(S32K324, self).create_init_sequence()
+        seq = super(S32K314, self).create_init_sequence()
 
         return seq

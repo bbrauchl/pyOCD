@@ -18,7 +18,7 @@
 from ..family.target_s32k3xx import (S32K3XX, FLASH_ALGO)
 from ...core.memory_map import (FlashRegion, RamRegion, MemoryMap)
 
-class S32K324(S32K3XX):
+class S32K396(S32K3XX):
 
     VENDOR = "NXP"
 
@@ -27,23 +27,23 @@ class S32K324(S32K3XX):
         FlashRegion(name="dflash",  start=0x10000000, end=0x1001ffff, blocksize=0x2000, page_size=FLASH_ALGO.get('page_size'), algo=FLASH_ALGO),
         RamRegion(name="itcm",      start=0x00000000, length=0x8000), # 32 KB
         RamRegion(name="dtcm",      start=0x20000000, length=0x10000), # 64 KB
-        RamRegion(name="sram",      start=0x20400000, length=0x50000), # 320 KB
+        RamRegion(name="sram",      start=0x20400000, length=0x80000), # 512 KB
         )
 
     def __init__(self, session):
-        super(S32K324, self).__init__(session, self.MEMORY_MAP)
+        super(S32K396, self).__init__(session, self.MEMORY_MAP)
 
     @property
     def core_ap_idx_array(self) -> list:
-        return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_1_AHB_AP_IDX]
+        return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_1_AHB_AP_IDX, S32K3XX.CM7_2_AHB_AP_IDX]
 
     def reset(self, reset_type=None):
-        super(S32K324, self).reset(self.ResetType.SW_VECTRESET)
+        super(S32K396, self).reset(self.ResetType.SW_VECTRESET)
 
     def reset_and_halt(self, reset_type=None, map_to_user=True):
-        super(S32K324, self).reset_and_halt(self.ResetType.SW_VECTRESET)
+        super(S32K396, self).reset_and_halt(self.ResetType.SW_VECTRESET)
 
     def create_init_sequence(self):
-        seq = super(S32K324, self).create_init_sequence()
+        seq = super(S32K396, self).create_init_sequence()
 
         return seq

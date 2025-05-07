@@ -62,11 +62,26 @@ from . import target_nRF52832_xxAA
 from . import target_nRF52833_xxAA
 from . import target_nRF52840_xxAA
 from . import target_nRF91xx
+from . import target_S32K310
+from . import target_S32K311
 from . import target_S32K312
+from . import target_S32K314
+from . import target_S32K322
 from . import target_S32K324
+from . import target_S32K328
+from . import target_S32K338
+from . import target_S32K341
+from . import target_S32K342
 from . import target_S32K344
+from . import target_S32K348
 from . import target_S32K358
+from . import target_S32K364
+from . import target_S32K366
+from . import target_S32K374
+from . import target_S32K376
 from . import target_S32K388
+from . import target_S32K394
+from . import target_S32K396
 from . import target_STM32F103RC
 from . import target_STM32F051T8
 from . import target_STM32F412xx
@@ -209,11 +224,26 @@ BUILTIN_TARGETS = {
           'nrf52833': target_nRF52833_xxAA.NRF52833,
           'nrf52840' : target_nRF52840_xxAA.NRF52840,
           'nrf91' : target_nRF91xx.NRF91XX,
+          's32k310': target_S32K310.S32K310,
+          's32k311': target_S32K311.S32K311,
           's32k312': target_S32K312.S32K312,
+          's32k314': target_S32K314.S32K314,
+          's32k322': target_S32K322.S32K322,
           's32k324': target_S32K324.S32K324,
+          's32k328': target_S32K328.S32K328,
+          's32k338': target_S32K338.S32K338,
+          's32k341': target_S32K341.S32K341,
+          's32k342': target_S32K342.S32K342,
           's32k344': target_S32K344.S32K344,
+          's32k348': target_S32K348.S32K348,
           's32k358': target_S32K358.S32K358,
+          's32k364': target_S32K364.S32K364,
+          's32k366': target_S32K366.S32K366,
+          's32k374': target_S32K374.S32K374,
+          's32k376': target_S32K376.S32K376,
           's32k388': target_S32K388.S32K388,
+          's32k394': target_S32K394.S32K394,
+          's32k396': target_S32K396.S32K396,
           'stm32f103rc': target_STM32F103RC.STM32F103RC,
           'stm32f051': target_STM32F051T8.STM32F051,
           'stm32f412xe' : target_STM32F412xx.STM32F412xE,
