@@ -124,7 +124,7 @@ class SoCTarget(TargetGraphNode):
             self._elf = None
         else:
             self._elf = ELFBinaryFile(filename, self.memory_map)
-            for core_number in range(len(self.cores)):
+            for core_number in self.cores.keys():
                 self.cores[core_number].elf = self._elf
                 if self.session.options['cache.read_code_from_elf']:
                     self.cores[core_number].set_target_context(
