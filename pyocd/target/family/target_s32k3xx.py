@@ -204,6 +204,12 @@ class S32K3XX(CoreSightTarget):
         self.sda_ap = None
         self._force_halt_on_connect = False
 
+    def reset(self, reset_type=None):
+        self.reset(self.ResetType.SW_VECTRESET)
+
+    def reset_and_halt(self, reset_type=None, map_to_user=True):
+        self.reset_and_halt(self.ResetType.SW_VECTRESET)
+
     def create_init_sequence(self):
         seq = super(S32K3XX, self).create_init_sequence()
 

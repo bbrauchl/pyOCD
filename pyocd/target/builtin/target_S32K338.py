@@ -36,14 +36,3 @@ class S32K338(S32K3XX):
     @property
     def core_ap_idx_array(self) -> list:
         return [S32K3XX.CM7_0_AHB_AP_IDX, S32K3XX.CM7_1_AHB_AP_IDX, S32K3XX.CM7_2_AHB_AP_IDX]
-
-    def reset(self, reset_type=None):
-        super(S32K338, self).reset(self.ResetType.SW_VECTRESET)
-
-    def reset_and_halt(self, reset_type=None, map_to_user=True):
-        super(S32K338, self).reset_and_halt(self.ResetType.SW_VECTRESET)
-
-    def create_init_sequence(self):
-        seq = super(S32K338, self).create_init_sequence()
-
-        return seq
